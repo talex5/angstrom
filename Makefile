@@ -5,7 +5,7 @@ benchmark:
 	OCAMLRUNPARAM=l=1000000000 dune exec -- ./benchmarks/simple_benchmark.exe
 
 build:
-	dune build
+	dune runtest ./lib_test
 
 all: build
 

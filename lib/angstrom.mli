@@ -611,7 +611,6 @@ module Buffered : sig
   val state_to_unconsumed : _ state -> unconsumed option
   (** [state_to_unconsumed state] returns [Some bs] if [state = Done(bs, _)] or
       [state = Fail(bs, _, _)] and [None] otherwise. *)
-
 end
 
 (** Unbuffered parsing interface.
@@ -639,34 +638,34 @@ module Unbuffered : sig
     | Incomplete
 
   type 'a state =
-    | Partial of 'a partial (** The parser requires more input. *)
     | Done    of int * 'a (** The parser succeeded, consuming specified bytes. *)
     | Fail    of int * string list * string (** The parser failed, consuming specified bytes. *)
-  and 'a partial =
-    { committed : int
-      (** The number of bytes committed during the last input feeding.
-          Callers must drop this number of bytes from the beginning of the
-          input on subsequent calls. See {!commit} for additional details. *)
-    ; continue : bigstring -> off:int -> len:int -> more -> 'a state
-      (** A continuation of a parse that requires additional input. The input
-          should include all uncommitted input (as reported by previous partial
-          states) in addition to any new input that has become available, as
-          well as an indication of whether there is {!more} input to come.  *)
-    }
+
+  effect Read : int -> (bigstring * int * int * more)
+  (** The [Read committed] effect is performed by the parser when it requires
+      more input data.
+
+      [committed] is the number of bytes committed during the last input feeding.
+      Handlers must drop this number of bytes from the beginning of the
+      input before continuing. See {!commit} for additional details.
+
+      The continuation should be resumed with some additional input. The input
+      should include all uncommitted input in addition to any new input that has
+      become available, as well as an indication of whether there is {!more}
+      input to come.  *)
 
   val parse : 'a t -> 'a state
-  (** [parse t] runs [t] and await input if needed. *)
+  (** [parse t] runs [t] and returns the result.
+      It performs the [Read] effect whenever input if needed. *)
 
   val state_to_option : 'a state -> 'a option
-
   (** [state_to_option state] returns [Some v] if the parser is in the
       [Done (bs, v)] state and [None] otherwise. This function has no effect on the
       current state of the parser. *)
 
   val state_to_result : 'a state -> ('a, string) result
   (** [state_to_result state] returns [Ok v] if the parser is in the
-      [Done (bs, v)] state and [Error msg] if it is in the [Fail] or [Partial]
-      state.
+      [Done (bs, v)] state and [Error msg] if it is in the [Fail] state.
 
       This function has no effect on the current state of the parser. *)
 end

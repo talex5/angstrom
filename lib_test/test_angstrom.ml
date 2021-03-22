@@ -394,15 +394,15 @@ let choice_commit =
 let input =
   let test p input ~off ~len expect =
     match Angstrom.Unbuffered.parse p with
-    | Done _ | Fail _ -> assert false
-    | Partial { continue; committed } ->
-      Alcotest.(check int) "committed is zero" 0 committed;
-      let bs = Bigstringaf.of_string input ~off:0 ~len:(String.length input) in
-      let state = continue bs ~off ~len Complete in
+    | state ->
       Alcotest.(check (result string string))
         "offset and length respected"
         (Ok expect)
-        (Angstrom.Unbuffered.state_to_result state);
+        (Angstrom.Unbuffered.state_to_result state)
+    | effect (Angstrom.Unbuffered.Read committed) k ->
+      Alcotest.(check int) "committed is zero" 0 committed;
+      let bs = Bigstringaf.of_string input ~off:0 ~len:(String.length input) in
+      continue k (bs, off, len, Complete)
   in
 
   [ "offset and length respected", `Quick, begin fun () ->

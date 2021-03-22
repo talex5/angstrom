@@ -1,14 +1,8 @@
 module State = struct
   type 'a t =
-    | Partial of 'a partial
     | Lazy    of 'a t Lazy.t
     | Done    of int * 'a
     | Fail    of int * string list * string
-
-  and 'a partial =
-    { committed : int
-    ; continue  : Bigstringaf.t -> off:int -> len:int -> More.t -> 'a t }
-
 end
 type 'a with_state = Input.t ->  int -> More.t -> 'a
 
@@ -24,12 +18,6 @@ let succeed_k input pos _       v   =
   State.Done(pos - Input.client_committed_bytes input, v)
 
 let rec to_exported_state = function
-  | State.Partial {committed;continue} ->
-     Exported_state.Partial
-       { committed
-       ; continue =
-           fun bs ~off ~len more ->
-           to_exported_state (continue bs ~off ~len more)}
   | State.Done (i,x) -> Exported_state.Done (i,x)
   | State.Fail (i, sl, s) -> Exported_state.Fail (i, sl, s)
   | State.Lazy x -> to_exported_state (Lazy.force x)
