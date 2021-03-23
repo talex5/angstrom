@@ -1,4 +1,9 @@
 (executables
+ (libraries angstrom RFC2616 RFC7159 bigstringaf unix)
+ (modules simple_benchmark)
+ (names simple_benchmark))
+
+(executables
  (libraries angstrom core_bench threads RFC2616 RFC7159)
  (modules pure_benchmark)
  (names pure_benchmark))

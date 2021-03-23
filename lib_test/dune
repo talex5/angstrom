@@ -2,11 +2,7 @@
  (name angstrom_test)
  (libraries angstrom)
  (flags :standard -safe-string)
- (modules test_let_syntax_native test_let_syntax_ppx)
- (preprocess
-  (per_module
-   (future_syntax test_let_syntax_native)
-   ((pps ppx_let) test_let_syntax_ppx))))
+ (modules test_let_syntax_native))
 
 (executables
  (libraries alcotest angstrom angstrom_test)

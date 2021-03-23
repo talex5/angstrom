@@ -1,5 +1,9 @@
 .PHONY: all build clean test install uninstall doc examples
 
+benchmark:
+	dune runtest ./lib_test
+	dune exec -- ./benchmarks/simple_benchmark.exe
+
 build:
 	dune build
 
