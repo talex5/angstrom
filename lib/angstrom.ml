@@ -454,33 +454,11 @@ let take_till f =
 let choice ?(failure_msg="no more choices") ps =
   List.fold_right (<|>) ps (fail failure_msg)
 
-let fix_direct f =
-  let rec p = lazy (f r)
-  and r = { run = fun buf pos more fail succ ->
-    (Lazy.force p).run buf pos more fail succ }
+let fix f =
+  let rec r = { run = fun buf pos more fail succ ->
+      (f r).run buf pos more fail succ }
   in
   r
-
-let fix_lazy f =
-  let max_steps = 20 in
-  let steps = ref max_steps in
-  let rec p = lazy (f r)
-  and r = { run = fun buf pos more fail succ ->
-    decr steps;
-    if !steps < 0
-    then (
-      steps := max_steps;
-      State.Lazy (lazy ((Lazy.force p).run buf pos more fail succ)))
-    else
-      (Lazy.force p).run buf pos more fail succ
-          }
-  in
-  r
-
-let fix = match Sys.backend_type with
-  | Native -> fix_direct
-  | Bytecode -> fix_direct
-  | Other _ -> fix_lazy
 
 let option x p =
   p <|> return x

@@ -1,6 +1,5 @@
 module State = struct
   type 'a t =
-    | Lazy    of 'a t Lazy.t
     | Done    of int * 'a
     | Fail    of int * string list * string
 end
@@ -17,10 +16,9 @@ let fail_k    input pos _ marks msg =
 let succeed_k input pos _       v   =
   State.Done(pos - Input.client_committed_bytes input, v)
 
-let rec to_exported_state = function
+let to_exported_state = function
   | State.Done (i,x) -> Exported_state.Done (i,x)
   | State.Fail (i, sl, s) -> Exported_state.Fail (i, sl, s)
-  | State.Lazy x -> to_exported_state (Lazy.force x)
 
 let parse p =
   let input = Input.create Bigstringaf.empty ~committed_bytes:0 ~off:0 ~len:0 in
