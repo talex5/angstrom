@@ -1,5 +1,5 @@
 (* int is bytes consumed *)
-type 'a state =
+type 'a parse_result =
   | Done    of int * 'a
   | Fail    of int * string list * string
 

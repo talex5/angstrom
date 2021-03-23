@@ -160,63 +160,43 @@ let rec prompt state =
   else
     true
 
-let demand_input =
-  { run = fun state ->
-    match (state.more : More.t) with
-    | Complete   ->
+let demand_input (state : Unbuffered.state) =
+  match (state.more : More.t) with
+  | Complete   ->
+    failf "not enough input"
+  | Incomplete ->
+    if not (prompt state) then
       failf "not enough input"
-    | Incomplete ->
-      if not (prompt state) then
-        failf "not enough input"
-  }
 
-let ensure_suspended n state =
-  let rec go =
-    { run = fun state ->
-      if state.pos + n <= Input.length state.input then
-        ()
-      else
-        (demand_input *> go).run state
-    }
-  in
-  (demand_input *> go).run state
+let rec ensure_suspended n state =
+  demand_input state;
+  if state.pos + n > Input.length state.input then
+    ensure_suspended n state
 
-let unsafe_apply len ~f =
-  { run = fun state ->
-    let r = Input.apply state.input state.pos len ~f in
+let unsafe_apply len ~f state =
+  let r = Input.apply state.input state.pos len ~f in
+  state.pos <- state.pos + len;
+  r
+
+let unsafe_apply_opt len ~f state =
+  match Input.apply state.input state.pos len ~f with
+  | Error e -> raise (Fail ([], e))
+  | Ok    x ->
     state.pos <- state.pos + len;
-    r
-  }
+    x
 
-let unsafe_apply_opt len ~f =
-  { run = fun state ->
-    match Input.apply state.input state.pos len ~f with
-    | Error e -> raise (Fail ([], e))
-    | Ok    x ->
-      state.pos <- state.pos + len;
-      x
-  }
-
-let ensure n p =
-  { run = fun state ->
-    if state.pos + n <= Input.length state.input
-    then p.run state
-    else (
-      ensure_suspended n state;
-      p.run state
-    )
-  }
+let ensure n p state =
+  if state.pos + n > Input.length state.input then ensure_suspended n state;
+  p state
 
 (** END: getting input *)
 
-let at_end_of_input =
-  { run = fun state ->
-    if state.pos < Input.length state.input then
-      false
-    else match state.more with
+let at_end_of_input state =
+  if state.pos < Input.length state.input then
+    false
+  else match state.more with
     | Complete -> true
     | Incomplete -> not (prompt state)
-  }
 
 let end_of_input =
   at_end_of_input
@@ -228,207 +208,178 @@ let advance n =
   if n < 0
   then fail "advance"
   else
-    let p = { run = fun state -> state.pos <- state.pos + n } in
+    let p state = state.pos <- state.pos + n in
     ensure n p
 
-let pos =
-  { run = fun state -> state.pos }
+let pos state = state.pos
 
-let available =
-  { run = fun state ->
-    Input.length state.input - state.pos
-  }
+let available state =
+  Input.length state.input - state.pos
 
-let commit =
-  { run = fun state ->
-    Input.commit state.input state.pos }
+let commit state =
+  Input.commit state.input state.pos
 
 (* Do not use this if [p] contains a [commit]. *)
-let unsafe_lookahead p =
-  { run = fun state ->
-    let old_pos = state.pos in
-    let v = p.run state in
-    state.pos <- old_pos;
-    v
-  }
+let unsafe_lookahead p state =
+  let old_pos = state.pos in
+  let v = p state in
+  state.pos <- old_pos;
+  v
 
-let peek_char =
-  { run = fun state ->
-    if state.pos < Input.length state.input then
-      Some (Input.unsafe_get_char state.input state.pos)
-    else if state.more = Complete then
-      None
-    else
-      if prompt state then
-        Some (Input.unsafe_get_char state.input state.pos)
-      else
-        None
-  }
+let peek_char state =
+  if state.pos < Input.length state.input then
+    Some (Input.unsafe_get_char state.input state.pos)
+  else if state.more = Complete then
+    None
+  else
+  if prompt state then
+    Some (Input.unsafe_get_char state.input state.pos)
+  else
+    None
 
 (* This parser is too important to not be optimized. Do a custom job. *)
-let rec peek_char_fail =
-  { run = fun state ->
-    if state.pos < Input.length state.input
-    then Input.unsafe_get_char state.input state.pos
-    else (
-      ensure_suspended 1 state;
-      peek_char_fail.run state
-    )
-  }
+let rec peek_char_fail state =
+  if state.pos < Input.length state.input
+  then Input.unsafe_get_char state.input state.pos
+  else (
+    ensure_suspended 1 state;
+    peek_char_fail state
+  )
 
-let satisfy f =
-  { run = fun state ->
-    if state.pos = Input.length state.input then
-      ensure_suspended 1 state;
-    let c = Input.unsafe_get_char state.input state.pos in
-    if f c
+let satisfy f state =
+  if state.pos = Input.length state.input then
+    ensure_suspended 1 state;
+  let c = Input.unsafe_get_char state.input state.pos in
+  if f c
+  then (
+    state.pos <- state.pos + 1;
+    c
+  ) else (
+    failf "satisfy: %C" c
+  )
+
+let char c =
+  let p state =
+    if Input.unsafe_get_char state.input state.pos = c
     then (
       state.pos <- state.pos + 1;
       c
     ) else (
-      failf "satisfy: %C" c
+      failf "char %C" c
     )
-  }
-
-let char c =
-  let p =
-    { run = fun state ->
-      if Input.unsafe_get_char state.input state.pos = c
-      then (
-        state.pos <- state.pos + 1;
-        c
-      ) else (
-        failf "char %C" c
-      )
-    }
   in
   ensure 1 p
 
 let not_char c =
-  let p =
-    { run = fun state ->
-      let c' = Input.unsafe_get_char state.input state.pos in
-      if c <> c'
-      then (
-        state.pos <- state.pos + 1;
-        c'
-      ) else (
-        failf "not char %C" c
-      )
-    }
+  let p state =
+    let c' = Input.unsafe_get_char state.input state.pos in
+    if c <> c'
+    then (
+      state.pos <- state.pos + 1;
+      c'
+    ) else (
+      failf "not char %C" c
+    )
   in
   ensure 1 p
 
 let any_char =
-  let p =
-    { run = fun state ->
-      let c = Input.unsafe_get_char state.input state.pos in
-      state.pos <- state.pos + 1;
-      c
-    }
+  let p state =
+    let c = Input.unsafe_get_char state.input state.pos in
+    state.pos <- state.pos + 1;
+    c
   in
   ensure 1 p
 
 let int8 i =
-  let p =
-    { run = fun state ->
-      let c = Char.code (Input.unsafe_get_char state.input state.pos) in
-      if c = i land 0xff
-      then (
-        state.pos <- state.pos + 1;
-        c
-      ) else (
-        failf "int8 %d" i
-      )
-    }
+  let p state =
+    let c = Char.code (Input.unsafe_get_char state.input state.pos) in
+    if c = i land 0xff
+    then (
+      state.pos <- state.pos + 1;
+      c
+    ) else (
+      failf "int8 %d" i
+    )
   in
   ensure 1 p
 
 let any_uint8 =
-  let p =
-    { run = fun state ->
-      let c = Input.unsafe_get_char state.input state.pos in
-      state.pos <- state.pos + 1;
-      Char.code c
-    }
+  let p state =
+    let c = Input.unsafe_get_char state.input state.pos in
+    state.pos <- state.pos + 1;
+    Char.code c
   in
   ensure 1 p
 
 let any_int8 =
   (* https://graphics.stanford.edu/~seander/bithacks.html#VariableSignExtendRisky *)
   let s = Sys.int_size - 8 in
-  let p =
-    { run = fun state ->
-      let c = Input.unsafe_get_char state.input state.pos in
-      state.pos <- state.pos + 1;
-      (Char.code c lsl s) asr s
-    }
+  let p state =
+    let c = Input.unsafe_get_char state.input state.pos in
+    state.pos <- state.pos + 1;
+    (Char.code c lsl s) asr s
   in
   ensure 1 p
 
 let skip f =
-  let p =
-    { run = fun state ->
-      if f (Input.unsafe_get_char state.input state.pos)
-      then state.pos <- state.pos + 1
-      else failf "skip" }
+  let p state =
+    if f (Input.unsafe_get_char state.input state.pos)
+    then state.pos <- state.pos + 1
+    else failf "skip"
   in
   ensure 1 p
 
-let rec count_while ~init ~f ~with_buffer =
-  { run = fun state ->
-    let pos         = state.pos in
-    let len         = Input.count_while state.input (pos + init) ~f in
-    let input_len   = Input.length state.input in
-    let init'       = init + len in
-    (* Check if the loop terminated because it reached the end of the input
-     * buffer. If so, then prompt for additional input and continue. *)
-    if pos + init' < input_len || state.more = Complete
-    then (
+let rec count_while ~init ~f ~with_buffer state =
+  let pos         = state.pos in
+  let len         = Input.count_while state.input (pos + init) ~f in
+  let input_len   = Input.length state.input in
+  let init'       = init + len in
+  (* Check if the loop terminated because it reached the end of the input
+   * buffer. If so, then prompt for additional input and continue. *)
+  if pos + init' < input_len || state.more = Complete
+  then (
+    let r = Input.apply state.input pos init' ~f:with_buffer in
+    state.pos <- pos + init';
+    r
+  ) else (
+    if prompt state then
+      (count_while ~init:init' ~f ~with_buffer) state
+    else (
       let r = Input.apply state.input pos init' ~f:with_buffer in
       state.pos <- pos + init';
       r
-    ) else (
-      if prompt state then
-        (count_while ~init:init' ~f ~with_buffer).run state
-      else (
-        let r = Input.apply state.input pos init' ~f:with_buffer in
-        state.pos <- pos + init';
-        r
-      )
     )
-  }
+  )
 
-let rec count_while1 ~f ~with_buffer =
-  { run = fun state ->
-    let pos         = state.pos in
-    let len         = Input.count_while state.input pos ~f in
-    let input_len   = Input.length state.input in
-    (* Check if the loop terminated because it reached the end of the input
-     * buffer. If so, then prompt for additional input and continue. *)
-    if len < 1
-    then
-      if pos < input_len || state.more = Complete
-      then failf "count_while1"
-      else if prompt state then
-        (count_while1 ~f ~with_buffer).run state
-      else
-        failf "count_while1"
-    else if pos + len < input_len || state.more = Complete
-    then (
+let rec count_while1 ~f ~with_buffer state =
+  let pos         = state.pos in
+  let len         = Input.count_while state.input pos ~f in
+  let input_len   = Input.length state.input in
+  (* Check if the loop terminated because it reached the end of the input
+   * buffer. If so, then prompt for additional input and continue. *)
+  if len < 1
+  then
+    if pos < input_len || state.more = Complete
+    then failf "count_while1"
+    else if prompt state then
+      (count_while1 ~f ~with_buffer) state
+    else
+      failf "count_while1"
+  else if pos + len < input_len || state.more = Complete
+  then (
+    let r = Input.apply state.input pos len ~f:with_buffer in
+    state.pos <- state.pos + len;
+    r
+  ) else (
+    if prompt state then (
+      (count_while ~init:len ~f ~with_buffer) state
+    ) else (
       let r = Input.apply state.input pos len ~f:with_buffer in
       state.pos <- state.pos + len;
       r
-    ) else (
-      if prompt state then (
-        (count_while ~init:len ~f ~with_buffer).run state
-      ) else (
-        let r = Input.apply state.input pos len ~f:with_buffer in
-        state.pos <- state.pos + len;
-        r
-      )
     )
-  }
+  )
 
 let string_ f s =
   (* XXX(seliopou): Inefficient. Could check prefix equality to short-circuit
@@ -491,8 +442,7 @@ let choice ?(failure_msg="no more choices") ps =
 
 let fix f =
   let rec p = lazy (f r)
-  and r = { run = fun state ->
-    (Lazy.force p).run state }
+  and r state = (Lazy.force p) state
   in
   r
 
@@ -544,18 +494,17 @@ let skip_many1 p =
 let end_of_line =
   (char '\n' *> return ()) <|> (string "\r\n" *> return ()) <?> "end_of_line"
 
-let scan_ state f ~with_buffer =
-  { run = fun parser_state ->
-    let state = ref state in
-    let parser =
-      count_while ~init:0 ~f:(fun c ->
+let scan_ state f ~with_buffer parser_state =
+  let state = ref state in
+  let p =
+    count_while ~init:0 ~f:(fun c ->
         match f !state c with
         | None -> false
         | Some state' -> state := state'; true)
       ~with_buffer
-      >>| fun x -> x, !state
-    in
-    parser.run parser_state }
+    >>| fun x -> x, !state
+  in
+  p parser_state
 
 let scan state f =
   scan_ state f ~with_buffer:Bigstringaf.substring
@@ -567,18 +516,16 @@ let scan_state state f =
 let scan_string state f =
   scan state f >>| fst
 
-let consume_with p f =
-  { run = fun state ->
-    let start = state.pos in
-    let parser_committed_bytes = Input.parser_committed_bytes state.input  in
-    let _ = p.run state in
-    if parser_committed_bytes <> Input.parser_committed_bytes state.input
-    then failf "consumed: parser committed"
-    else (
-      let len = state.pos - start in
-      Input.apply state.input start len ~f
-    )
-  }
+let consume_with p f state =
+  let start = state.pos in
+  let parser_committed_bytes = Input.parser_committed_bytes state.input  in
+  let _ = p state in
+  if parser_committed_bytes <> Input.parser_committed_bytes state.input
+  then failf "consumed: parser committed"
+  else (
+    let len = state.pos - start in
+    Input.apply state.input start len ~f
+  )
 
 let consumed           p = consume_with p Bigstringaf.substring
 let consumed_bigstring p = consume_with p Bigstringaf.copy
@@ -619,31 +566,28 @@ module BE = struct
    * *)
   let int16 n =
     let bytes = 2 in
-    let p =
-      { run = fun state ->
-        if Input.unsafe_get_int16_be state.input state.pos = (n land 0xffff)
-        then state.pos <- state.pos + bytes
-        else failf "BE.int16" }
+    let p state =
+      if Input.unsafe_get_int16_be state.input state.pos = (n land 0xffff)
+      then state.pos <- state.pos + bytes
+      else failf "BE.int16"
     in
     ensure bytes p
 
   let int32 n =
     let bytes = 4 in
-    let p =
-      { run = fun state ->
-        if Int32.equal (Input.unsafe_get_int32_be state.input state.pos) n
-        then state.pos <- state.pos + bytes
-        else failf "BE.int32" }
+    let p state =
+      if Int32.equal (Input.unsafe_get_int32_be state.input state.pos) n
+      then state.pos <- state.pos + bytes
+      else failf "BE.int32"
     in
     ensure bytes p
 
   let int64 n =
     let bytes = 8 in
-    let p =
-      { run = fun state ->
-        if Int64.equal (Input.unsafe_get_int64_be state.input state.pos) n
-        then state.pos <- state.pos + bytes
-        else failf "BE.int64" }
+    let p state =
+      if Int64.equal (Input.unsafe_get_int64_be state.input state.pos) n
+      then state.pos <- state.pos + bytes
+      else failf "BE.int64"
     in
     ensure bytes p
 
@@ -669,31 +613,28 @@ end
 module LE = struct
   let int16 n =
     let bytes = 2 in
-    let p =
-      { run = fun state ->
-        if Input.unsafe_get_int16_le state.input state.pos = (n land 0xffff)
-        then state.pos <- state.pos + bytes
-        else failf "LE.int16" }
+    let p state =
+      if Input.unsafe_get_int16_le state.input state.pos = (n land 0xffff)
+      then state.pos <- state.pos + bytes
+      else failf "LE.int16"
     in
     ensure bytes p
 
   let int32 n =
     let bytes = 4 in
-    let p =
-      { run = fun state ->
-        if Int32.equal (Input.unsafe_get_int32_le state.input state.pos) n
-        then state.pos <- state.pos + bytes
-        else failf "LE.int32" }
+    let p state =
+      if Int32.equal (Input.unsafe_get_int32_le state.input state.pos) n
+      then state.pos <- state.pos + bytes
+      else failf "LE.int32"
     in
     ensure bytes p
 
   let int64 n =
     let bytes = 8 in
-    let p =
-      { run = fun state ->
-        if Int64.equal (Input.unsafe_get_int64_le state.input state.pos) n
-        then state.pos <- state.pos + bytes
-        else failf "LE.int64" }
+    let p state =
+      if Int64.equal (Input.unsafe_get_int64_le state.input state.pos) n
+      then state.pos <- state.pos + bytes
+      else failf "LE.int64"
     in
     ensure bytes p
 

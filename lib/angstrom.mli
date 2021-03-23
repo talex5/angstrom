@@ -637,7 +637,7 @@ module Unbuffered : sig
     | Complete
     | Incomplete
 
-  type 'a state =
+  type 'a parse_result =
     | Done    of int * 'a (** The parser succeeded, consuming specified bytes. *)
     | Fail    of int * string list * string (** The parser failed, consuming specified bytes. *)
 
@@ -654,16 +654,16 @@ module Unbuffered : sig
       become available, as well as an indication of whether there is {!more}
       input to come.  *)
 
-  val parse : 'a t -> 'a state
+  val parse : 'a t -> 'a parse_result
   (** [parse t] runs [t] and returns the result.
       It performs the [Read] effect whenever input if needed. *)
 
-  val state_to_option : 'a state -> 'a option
+  val state_to_option : 'a parse_result -> 'a option
   (** [state_to_option state] returns [Some v] if the parser is in the
       [Done (bs, v)] state and [None] otherwise. This function has no effect on the
       current state of the parser. *)
 
-  val state_to_result : 'a state -> ('a, string) result
+  val state_to_result : 'a parse_result -> ('a, string) result
   (** [state_to_result state] returns [Ok v] if the parser is in the
       [Done (bs, v)] state and [Error msg] if it is in the [Fail] state.
 
