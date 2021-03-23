@@ -1,3 +1,4 @@
+(* int is bytes consumed *)
 type 'a state =
   | Done    of int * 'a
   | Fail    of int * string list * string
