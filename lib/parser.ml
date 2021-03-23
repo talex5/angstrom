@@ -1,42 +1,53 @@
-exception Fail of Input.t * int * More.t * string list * string
+exception Fail of string list * string
 
-type 'a with_state = Input.t ->  int -> More.t -> 'a
+type state = {
+  mutable input : Input.t;
+  mutable pos : int;
+  mutable more : More.t;
+}
 
 type 'a t =
-  { run : (Input.t * int * More.t * 'a) with_state }
+  { run : state -> 'a }
 
 let parse p =
-  let input = Input.create Bigstringaf.empty ~committed_bytes:0 ~off:0 ~len:0 in
-  match p.run input 0 Incomplete with
-  | (input, i, _more, x) ->
-    Exported_state.Done (i - Input.client_committed_bytes input,x)
-  | exception Fail (input, i, _more, sl, s) -> Exported_state.Fail (i - Input.client_committed_bytes input, sl, s)
+  let state = {
+    input = Input.create Bigstringaf.empty ~committed_bytes:0 ~off:0 ~len:0;
+    pos = 0;
+    more = Incomplete;
+  } in
+  match p.run state with
+  | x ->
+    Exported_state.Done (state.pos - Input.client_committed_bytes state.input, x)
+  | exception Fail (sl, s) -> Exported_state.Fail (state.pos - Input.client_committed_bytes state.input, sl, s)
 
 let parse_bigstring p input =
-  let input = Input.create input ~committed_bytes:0 ~off:0 ~len:(Bigstringaf.length input) in
+  let state = {
+    input = Input.create input ~committed_bytes:0 ~off:0 ~len:(Bigstringaf.length input);
+    pos = 0;
+    more = Complete;
+  } in
   Exported_state.state_to_result (
-    match p.run input 0 Complete with
-    | (input, i, _more, x) -> Exported_state.Done (i - Input.client_committed_bytes input,x)
-    | exception Fail (input, i, _more, sl, s) -> Exported_state.Fail (i - Input.client_committed_bytes input, sl, s)
+    match p.run state with
+    | x -> Exported_state.Done (state.pos - Input.client_committed_bytes state.input, x)
+    | exception Fail (sl, s) -> Exported_state.Fail (state.pos - Input.client_committed_bytes state.input, sl, s)
   )
 
 module Monad = struct
-  let return v =
-    { run = fun input pos more -> input, pos, more, v }
+  let return v = { run = fun _state -> v }
 
   let fail msg =
-    { run = fun input pos more -> raise_notrace (Fail (input, pos, more, [], msg)) }
+    { run = fun _state -> raise_notrace (Fail ([], msg)) }
 
   let (>>=) p f =
-    { run = fun input pos more ->
-      let input', pos', more', v = p.run input pos more in
-      (f v).run input' pos' more'
+    { run = fun state ->
+      let v = p.run state in
+      (f v).run state
     }
 
   let (>>|) p f =
-    { run = fun input pos more ->
-      let input', pos', more', v = p.run input pos more in
-      input', pos', more', f v
+    { run = fun state ->
+      let v = p.run state in
+      f v
     }
 
   let (<$>) f m =
@@ -44,77 +55,79 @@ module Monad = struct
 
   let (<*>) f m =
     (* f >>= fun f -> m >>| f *)
-    { run = fun input pos more ->
-      let input, pos, more, f = f.run input pos more in
-      let input, pos, more, m = m.run input pos more in
-      input, pos, more, f m
+    { run = fun state ->
+      let f = f.run state in
+      let m = m.run state in
+      f m
     }
 
   let lift f m =
     f <$> m
 
   let lift2 f m1 m2 =
-    { run = fun input pos more ->
-      let input, pos, more, m1 = m1.run input pos more in
-      let input, pos, more, m2 = m2.run input pos more in
-      input, pos, more, f m1 m2
+    { run = fun state ->
+      let m1 = m1.run state in
+      let m2 = m2.run state in
+      f m1 m2
     }
 
   let lift3 f m1 m2 m3 =
-    { run = fun input pos more ->
-      let input, pos, more, m1 = m1.run input pos more in
-      let input, pos, more, m2 = m2.run input pos more in
-      let input, pos, more, m3 = m3.run input pos more in
-      input, pos, more, f m1 m2 m3
+    { run = fun state ->
+      let m1 = m1.run state in
+      let m2 = m2.run state in
+      let m3 = m3.run state in
+      f m1 m2 m3
     }
 
   let lift4 f m1 m2 m3 m4 =
-    { run = fun input pos more ->
-      let input, pos, more, m1 = m1.run input pos more in
-      let input, pos, more, m2 = m2.run input pos more in
-      let input, pos, more, m3 = m3.run input pos more in
-      let input, pos, more, m4 = m4.run input pos more in
-      input, pos, more, f m1 m2 m3 m4
+    { run = fun state ->
+      let m1 = m1.run state in
+      let m2 = m2.run state in
+      let m3 = m3.run state in
+      let m4 = m4.run state in
+      f m1 m2 m3 m4
     }
 
   let ( *>) a b =
     (* a >>= fun _ -> b *)
-    { run = fun input pos more ->
-      let input, pos, more, _ = a.run input pos more in
-      b.run input pos more
+    { run = fun state ->
+      let _ = a.run state in
+      b.run state
     }
 
   let (<* ) a b =
     (* a >>= fun x -> b >>| fun _ -> x *)
-    { run = fun input pos more ->
-      let input, pos, more, x = a.run input pos more in
-      let input, pos, more, _ = b.run input pos more in
-      input, pos, more, x
+    { run = fun state ->
+      let x = a.run state in
+      let _ = b.run state in
+      x
     }
 end
 
 module Choice = struct
   let (<?>) p mark =
-    { run = fun input pos more ->
-      try p.run input pos more
-      with Fail (input', pos', more', marks, msg) ->
-        raise_notrace (Fail (input', pos', more', (mark::marks), msg))
+    { run = fun state ->
+      try p.run state
+      with Fail (marks, msg) ->
+        raise_notrace (Fail ((mark::marks), msg))
     }
 
   let (<|>) p q =
-    { run = fun input pos more ->
-      try p.run input pos more
-      with Fail (input', pos', more', marks, msg) ->
+    { run = fun state ->
+      let old_pos = state.pos in
+      try p.run state
+      with Fail (marks, msg) ->
         (* The only two constructors that introduce new failure continuations are
          * [<?>] and [<|>]. If the initial input position is less than the length
          * of the committed input, then calling the failure continuation will
          * have the effect of unwinding all choices and collecting marks along
          * the way. *)
-        if pos < Input.parser_committed_bytes input' then
-          (* Not sure why we re-raise with the original [more] here. Maybe it doesn't matter. *)
-          raise_notrace (Fail (input', pos', more, marks, msg))
-        else
-          q.run input' pos more'
+        if old_pos < Input.parser_committed_bytes state.input then
+          raise_notrace (Fail (marks, msg))
+        else (
+          state.pos <- old_pos;
+          q.run state
+        )
     }
 end
 
