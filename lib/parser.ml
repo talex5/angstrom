@@ -95,14 +95,14 @@ module Choice = struct
   let (<|>) p q state =
     let old_pos = state.pos in
     try p state
-    with Fail (marks, msg) ->
-      (* The only two constructors that introduce new failure continuations are
-       * [<?>] and [<|>]. If the initial input position is less than the length
+    with Fail _ as ex ->
+      (* The only three constructors that catch [Fail] are [<?>], [<|>] and [many].
+       * If the initial input position is less than the length
        * of the committed input, then calling the failure continuation will
        * have the effect of unwinding all choices and collecting marks along
        * the way. *)
       if old_pos < Input.parser_committed_bytes state.input then
-        raise_notrace (Fail (marks, msg))
+        raise_notrace ex
       else (
         state.pos <- old_pos;
         q state

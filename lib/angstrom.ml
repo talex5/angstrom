@@ -455,9 +455,15 @@ let count n p =
     in
     loop n
 
-let many p =
-  fix (fun m ->
-    (lift2 cons p m) <|> return [])
+let rec many p state =
+  let old_pos = state.pos in
+  match p state with
+  | v -> v :: many p state
+  | exception (Fail _ as ex) ->
+    if old_pos < Input.parser_committed_bytes state.input then
+      raise_notrace ex;
+    state.pos <- old_pos;
+    []
 
 let many1 p =
   lift2 cons p (many p)
