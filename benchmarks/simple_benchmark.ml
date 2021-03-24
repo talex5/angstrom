@@ -35,6 +35,12 @@ let bench name n_iters p data =
     minor_collections
     major_collections
 
+let slow =
+  Angstrom.(many any_char)
+
+let skip =
+  Angstrom.(skip_many any_char)
+
 let chars =
   Angstrom.(fix (fun p ->
       any_char >>= fun _ ->
@@ -48,4 +54,6 @@ let () =
   let parse_http = Angstrom.skip_many RFC2616.request in
   Printf.printf "Name        Time  MinWrds  MajWrds  MinCol  MajCol\n";
   bench "http"  100 parse_http http_get;
-  bench "count" 10  chars http_get
+  bench "count" 10  chars http_get;
+  bench "space" 10  slow  http_get;
+  bench "skip"  10  skip  http_get
