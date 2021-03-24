@@ -185,9 +185,8 @@ let unsafe_apply_opt len ~f state =
     state.pos <- state.pos + len;
     x
 
-let ensure n p state =
-  if state.pos + n > Input.length state.input then ensure_suspended n state;
-  p state
+let ensure n state =
+  if state.pos + n > Input.length state.input then ensure_suspended n state
 
 (** END: getting input *)
 
@@ -205,11 +204,10 @@ let end_of_input =
     | false -> fail "end_of_input"
 
 let advance n =
-  if n < 0
-  then fail "advance"
-  else
-    let p state = state.pos <- state.pos + n in
-    ensure n p
+  if n < 0 then fail "advance"
+  else fun state ->
+    ensure n state;
+    state.pos <- state.pos + n
 
 let pos state = state.pos
 
@@ -258,77 +256,64 @@ let satisfy f state =
     failf "satisfy: %C" c
   )
 
-let char c =
-  let p state =
-    if Input.unsafe_get_char state.input state.pos = c
-    then (
-      state.pos <- state.pos + 1;
-      c
-    ) else (
-      failf "char %C" c
-    )
-  in
-  ensure 1 p
-
-let not_char c =
-  let p state =
-    let c' = Input.unsafe_get_char state.input state.pos in
-    if c <> c'
-    then (
-      state.pos <- state.pos + 1;
-      c'
-    ) else (
-      failf "not char %C" c
-    )
-  in
-  ensure 1 p
-
-let any_char =
-  let p state =
-    let c = Input.unsafe_get_char state.input state.pos in
+let char c state =
+  ensure 1 state;
+  if Input.unsafe_get_char state.input state.pos = c
+  then (
     state.pos <- state.pos + 1;
     c
-  in
-  ensure 1 p
+  ) else (
+    failf "char %C" c
+  )
 
-let int8 i =
-  let p state =
-    let c = Char.code (Input.unsafe_get_char state.input state.pos) in
-    if c = i land 0xff
-    then (
-      state.pos <- state.pos + 1;
-      c
-    ) else (
-      failf "int8 %d" i
-    )
-  in
-  ensure 1 p
-
-let any_uint8 =
-  let p state =
-    let c = Input.unsafe_get_char state.input state.pos in
+let not_char c state =
+  ensure 1 state;
+  let c' = Input.unsafe_get_char state.input state.pos in
+  if c <> c'
+  then (
     state.pos <- state.pos + 1;
-    Char.code c
-  in
-  ensure 1 p
+    c'
+  ) else (
+    failf "not char %C" c
+  )
+
+let any_char state =
+  ensure 1 state;
+  let c = Input.unsafe_get_char state.input state.pos in
+  state.pos <- state.pos + 1;
+  c
+
+let int8 i state =
+  ensure 1 state;
+  let c = Char.code (Input.unsafe_get_char state.input state.pos) in
+  if c = i land 0xff
+  then (
+    state.pos <- state.pos + 1;
+    c
+  ) else (
+    failf "int8 %d" i state
+  )
+
+let any_uint8 state =
+  ensure 1 state;
+  let c = Input.unsafe_get_char state.input state.pos in
+  state.pos <- state.pos + 1;
+  Char.code c
 
 let any_int8 =
   (* https://graphics.stanford.edu/~seander/bithacks.html#VariableSignExtendRisky *)
   let s = Sys.int_size - 8 in
-  let p state =
-    let c = Input.unsafe_get_char state.input state.pos in
-    state.pos <- state.pos + 1;
-    (Char.code c lsl s) asr s
-  in
-  ensure 1 p
+  fun state ->
+  ensure 1 state;
+  let c = Input.unsafe_get_char state.input state.pos in
+  state.pos <- state.pos + 1;
+  (Char.code c lsl s) asr s
 
-let skip f =
-  let p state =
-    if f (Input.unsafe_get_char state.input state.pos)
-    then state.pos <- state.pos + 1
-    else failf "skip"
-  in
-  ensure 1 p
+let skip f state =
+  ensure 1 state;
+  if f (Input.unsafe_get_char state.input state.pos)
+  then state.pos <- state.pos + 1
+  else failf "skip"
 
 let rec count_while ~init ~f ~with_buffer state =
   let pos         = state.pos in
@@ -385,16 +370,20 @@ let string_ f s =
   (* XXX(seliopou): Inefficient. Could check prefix equality to short-circuit
    * the io. *)
   let len = String.length s in
-  ensure  len (unsafe_apply_opt len ~f:(fun buffer ~off ~len ->
+  let f buffer ~off ~len =
     let i = ref 0 in
     while !i < len && Char.equal (f (Bigstringaf.unsafe_get buffer (off + !i)))
-                                 (f (String.unsafe_get s !i))
+            (f (String.unsafe_get s !i))
     do
       incr i
     done;
     if len = !i
     then Ok (Bigstringaf.substring buffer ~off ~len)
-    else Error "string"))
+    else Error "string"
+  in
+  fun state ->
+    ensure len state;
+    unsafe_apply_opt len state ~f
 
 let string s    = string_ (fun x -> x) s
 let string_ci s = string_ Char.lowercase_ascii s
@@ -405,16 +394,16 @@ let skip_while f =
 let take n =
   if n < 0
   then fail "take: n < 0"
-  else
-    let n = max n 0 in
-    ensure n (unsafe_apply n ~f:Bigstringaf.substring)
+  else fun state ->
+    ensure n state;
+    unsafe_apply n ~f:Bigstringaf.substring state
 
 let take_bigstring n =
   if n < 0
   then fail "take_bigstring: n < 0"
-  else
-    let n = max n 0 in
-    ensure n (unsafe_apply n ~f:Bigstringaf.copy)
+  else fun state ->
+    ensure n state;
+    unsafe_apply n ~f:Bigstringaf.copy state
 
 let take_bigstring_while f =
   count_while ~init:0 ~f ~with_buffer:Bigstringaf.copy
@@ -564,104 +553,105 @@ module BE = struct
    *
    * This pattern does not allocate in the fast (success) path.
    * *)
-  let int16 n =
+  let int16 n state =
     let bytes = 2 in
-    let p state =
-      if Input.unsafe_get_int16_be state.input state.pos = (n land 0xffff)
-      then state.pos <- state.pos + bytes
-      else failf "BE.int16"
-    in
-    ensure bytes p
+    ensure bytes state;
+    if Input.unsafe_get_int16_be state.input state.pos = (n land 0xffff)
+    then state.pos <- state.pos + bytes
+    else failf "BE.int16"
 
-  let int32 n =
+  let int32 n state =
     let bytes = 4 in
-    let p state =
-      if Int32.equal (Input.unsafe_get_int32_be state.input state.pos) n
-      then state.pos <- state.pos + bytes
-      else failf "BE.int32"
-    in
-    ensure bytes p
+    ensure bytes state;
+    if Int32.equal (Input.unsafe_get_int32_be state.input state.pos) n
+    then state.pos <- state.pos + bytes
+    else failf "BE.int32"
 
-  let int64 n =
+  let int64 n state =
     let bytes = 8 in
-    let p state =
-      if Int64.equal (Input.unsafe_get_int64_be state.input state.pos) n
-      then state.pos <- state.pos + bytes
-      else failf "BE.int64"
-    in
-    ensure bytes p
+    ensure bytes state;
+    if Int64.equal (Input.unsafe_get_int64_be state.input state.pos) n
+    then state.pos <- state.pos + bytes
+    else failf "BE.int64"
 
-  let any_uint16 =
-    ensure 2 (unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_be bs off))
+  let any_uint16 state =
+    ensure 2 state;
+    unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_be bs off) state
 
-  let any_int16  =
-    ensure 2 (unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_sign_extended_be  bs off))
+  let any_int16 state =
+    ensure 2 state;
+    unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_sign_extended_be  bs off) state
 
-  let any_int32  =
-    ensure 4 (unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int32_be bs off))
+  let any_int32 state =
+    ensure 4 state;
+    unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int32_be bs off) state
 
-  let any_int64 =
-    ensure 8 (unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int64_be bs off))
+  let any_int64 state =
+    ensure 8 state;
+    unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int64_be bs off) state
 
-  let any_float =
-    ensure 4 (unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Int32.float_of_bits (Bigstringaf.unsafe_get_int32_be bs off)))
+  let any_float state =
+    ensure 4 state;
+    unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Int32.float_of_bits (Bigstringaf.unsafe_get_int32_be bs off)) state
 
-  let any_double =
-    ensure 8 (unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Int64.float_of_bits (Bigstringaf.unsafe_get_int64_be bs off)))
+  let any_double state =
+    ensure 8 state;
+    unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Int64.float_of_bits (Bigstringaf.unsafe_get_int64_be bs off)) state
 end
 
 module LE = struct
-  let int16 n =
+  let int16 n state =
     let bytes = 2 in
-    let p state =
-      if Input.unsafe_get_int16_le state.input state.pos = (n land 0xffff)
-      then state.pos <- state.pos + bytes
-      else failf "LE.int16"
-    in
-    ensure bytes p
+    ensure bytes state;
+    if Input.unsafe_get_int16_le state.input state.pos = (n land 0xffff)
+    then state.pos <- state.pos + bytes
+    else failf "LE.int16"
 
-  let int32 n =
+  let int32 n state =
     let bytes = 4 in
-    let p state =
-      if Int32.equal (Input.unsafe_get_int32_le state.input state.pos) n
-      then state.pos <- state.pos + bytes
-      else failf "LE.int32"
-    in
-    ensure bytes p
+    ensure bytes state;
+    if Int32.equal (Input.unsafe_get_int32_le state.input state.pos) n
+    then state.pos <- state.pos + bytes
+    else failf "LE.int32"
 
-  let int64 n =
+  let int64 n state =
     let bytes = 8 in
-    let p state =
-      if Int64.equal (Input.unsafe_get_int64_le state.input state.pos) n
-      then state.pos <- state.pos + bytes
-      else failf "LE.int64"
-    in
-    ensure bytes p
+    ensure bytes state;
+    if Int64.equal (Input.unsafe_get_int64_le state.input state.pos) n
+    then state.pos <- state.pos + bytes
+    else failf "LE.int64"
 
+  let any_uint16 state =
+    ensure 2 state;
+    unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_le bs off) state
 
-  let any_uint16 =
-    ensure 2 (unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_le bs off))
+  let any_int16  state =
+    ensure 2 state;
+    unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_sign_extended_le  bs off) state
 
-  let any_int16  =
-    ensure 2 (unsafe_apply 2 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int16_sign_extended_le  bs off))
+  let any_int32  state =
+    ensure 4 state;
+    unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int32_le bs off) state
 
-  let any_int32  =
-    ensure 4 (unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int32_le bs off))
+  let any_int64 state =
+    ensure 8 state;
+    unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int64_le bs off) state
 
-  let any_int64 =
-    ensure 8 (unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Bigstringaf.unsafe_get_int64_le bs off))
+  let any_float state =
+    ensure 4 state;
+    unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Int32.float_of_bits (Bigstringaf.unsafe_get_int32_le bs off)) state
 
-  let any_float =
-    ensure 4 (unsafe_apply 4 ~f:(fun bs ~off ~len:_ -> Int32.float_of_bits (Bigstringaf.unsafe_get_int32_le bs off)))
-
-  let any_double =
-    ensure 8 (unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Int64.float_of_bits (Bigstringaf.unsafe_get_int64_le bs off)))
+  let any_double state =
+    ensure 8 state;
+    unsafe_apply 8 ~f:(fun bs ~off ~len:_ -> Int64.float_of_bits (Bigstringaf.unsafe_get_int64_le bs off)) state
 end
 
 module Unsafe = struct
   let take n f =
     let n = max n 0 in
-    ensure n (unsafe_apply n ~f)
+    fun state ->
+    ensure n state;
+    unsafe_apply n ~f state
 
   let peek n f =
     unsafe_lookahead (take n f)
