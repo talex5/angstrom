@@ -46,8 +46,6 @@ module Unbuffered = struct
   type more = More.t =
     | Complete
     | Incomplete
-
-  effect Read : int -> (bigstring * int * int * More.t)
 end
 
 include Unbuffered
@@ -55,6 +53,9 @@ include Parser.Monad
 include Parser.Choice
 
 module Buffered = struct
+  effect Read : int -> (bigstring * int * int * More.t)
+  let read c = perform (Read c)
+
   type unconsumed = Buffering.unconsumed =
     { buf : bigstring
     ; off : int
@@ -81,7 +82,7 @@ module Buffered = struct
     if initial_buffer_size < 1 then
       failwith "parse: invalid argument, initial_buffer_size < 1";
     let buffering = Buffering.create initial_buffer_size in
-    match Unbuffered.parse p with
+    match Unbuffered.parse ~read p with
     | x -> from_unbuffered_state buffering x
     | effect (Read committed) k ->
       Buffering.shift buffering committed;
@@ -148,7 +149,7 @@ let rec prompt state =
   let parser_uncommitted_bytes = Input.parser_uncommitted_bytes input in
   let parser_committed_bytes   = Input.parser_committed_bytes   input in
   let committed = Input.bytes_for_client_to_commit input in
-  let input, off, len, more = perform (Read committed) in
+  let input, off, len, more = state.read committed in
   if len < parser_uncommitted_bytes then
     failwith "prompt: input shrunk!";
   state.input <- Input.create input ~off ~len ~committed_bytes:parser_committed_bytes;

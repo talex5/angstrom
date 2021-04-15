@@ -33,7 +33,6 @@ let check_lc  ?size ~msg p is r = check_ok ?size ~msg Alcotest.(list char)     p
 let check_co  ?size ~msg p is r = check_ok ?size ~msg Alcotest.(option char)   p is r
 let check_s   ?size ~msg p is r = check_ok ?size ~msg Alcotest.string          p is r
 let check_bs  ?size ~msg p is r = check_ok ?size ~msg Alcotest.bigstring       p is r
-let check_ls  ?size ~msg p is r = check_ok ?size ~msg Alcotest.(list string)   p is r
 let check_int ?size ~msg p is r = check_ok ?size ~msg Alcotest.int             p is r
 
 let bigstring_of_string s = Bigstringaf.of_string s ~off:0 ~len:(String.length s)
@@ -189,7 +188,6 @@ module Endian(Es : EndianBigstring) = struct
   }
 
   let uint16 = { int16 with name = "uint16"; min = 0; max = 65535 }
-  let uint32 = { int32 with name = "uint32" }
 
    let dump actual size value =
      let buf = Bigstringaf.of_string ~off:0 ~len:size (String.make size '\xff') in
@@ -393,18 +391,17 @@ let choice_commit =
 
 let input =
   let test p input ~off ~len expect =
-    match Angstrom.Unbuffered.parse p with
-    | state ->
-      Alcotest.(check (result string string))
-        "offset and length respected"
-        (Ok expect)
-        (Angstrom.Unbuffered.state_to_result state)
-    | effect (Angstrom.Unbuffered.Read committed) k ->
+    let read committed =
       Alcotest.(check int) "committed is zero" 0 committed;
       let bs = Bigstringaf.of_string input ~off:0 ~len:(String.length input) in
-      continue k (bs, off, len, Complete)
+      (bs, off, len, Angstrom.Unbuffered.Complete)
+    in
+    let state = Angstrom.Unbuffered.parse ~read p in
+    Alcotest.(check (result string string))
+      "offset and length respected"
+      (Ok expect)
+      (Angstrom.Unbuffered.state_to_result state)
   in
-
   [ "offset and length respected", `Quick, begin fun () ->
     let open Angstrom in
     let take_all = take_while (fun _ -> true) in

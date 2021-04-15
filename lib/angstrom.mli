@@ -641,22 +641,22 @@ module Unbuffered : sig
     | Done    of int * 'a (** The parser succeeded, consuming specified bytes. *)
     | Fail    of int * string list * string (** The parser failed, consuming specified bytes. *)
 
-  effect Read : int -> (bigstring * int * int * more)
-  (** The [Read committed] effect is performed by the parser when it requires
-      more input data.
+  type reader = int -> (bigstring * int * int * more)
+  (** The user provides a reader function to be called by the parser when it
+      requires more input data.
 
-      [committed] is the number of bytes committed during the last input feeding.
-      Handlers must drop this number of bytes from the beginning of the
-      input before continuing. See {!commit} for additional details.
+      The function is passed the number of bytes committed during the last
+      input feeding. It must drop this number of bytes from the beginning
+      of the input before continuing. See {!commit} for additional details.
 
-      The continuation should be resumed with some additional input. The input
+      The function should return with some additional input. The input
       should include all uncommitted input in addition to any new input that has
       become available, as well as an indication of whether there is {!more}
       input to come.  *)
 
-  val parse : 'a t -> 'a parse_result
-  (** [parse t] runs [t] and returns the result.
-      It performs the [Read] effect whenever input if needed. *)
+  val parse : read:reader -> 'a t -> 'a parse_result
+  (** [parse ~read t] runs [t] and returns the result.
+      It calls [read] whenever more input is needed. *)
 
   val state_to_option : 'a parse_result -> 'a option
   (** [state_to_option state] returns [Some v] if the parser is in the

@@ -1,6 +1,9 @@
 exception Fail of string list * string
 
+type reader = int -> (Bigstringaf.t * int * int * More.t)
+
 type state = {
+  read : reader;
   mutable input : Input.t;
   mutable pos : int;
   mutable more : More.t;
@@ -8,28 +11,30 @@ type state = {
 
 type 'a t = state -> 'a
 
-let parse p =
-  let state = {
-    input = Input.create Bigstringaf.empty ~committed_bytes:0 ~off:0 ~len:0;
-    pos = 0;
-    more = Incomplete;
-  } in
+ 
+let run p state =
   match p state with
   | x ->
     Exported_state.Done (state.pos - Input.client_committed_bytes state.input, x)
   | exception Fail (sl, s) -> Exported_state.Fail (state.pos - Input.client_committed_bytes state.input, sl, s)
 
-let parse_bigstring p input =
+let parse ~read p =
+  run p {
+    read;
+    input = Input.create Bigstringaf.empty ~committed_bytes:0 ~off:0 ~len:0;
+    pos = 0;
+    more = Incomplete;
+  }
+
+let parse_bigstring p buf =
+  let len = Bigstringaf.length buf in
   let state = {
-    input = Input.create input ~committed_bytes:0 ~off:0 ~len:(Bigstringaf.length input);
+    read = (fun _ -> assert false);             (* Always complete *)
+    input = Input.create buf ~committed_bytes:0 ~off:0 ~len;
     pos = 0;
     more = Complete;
   } in
-  Exported_state.state_to_result (
-    match p state with
-    | x -> Exported_state.Done (state.pos - Input.client_committed_bytes state.input, x)
-    | exception Fail (sl, s) -> Exported_state.Fail (state.pos - Input.client_committed_bytes state.input, sl, s)
-  )
+  Exported_state.state_to_result (run p state)
 
 module Monad = struct
   let return v _ = v
