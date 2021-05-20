@@ -480,9 +480,14 @@ let sep_by1 s p =
 let sep_by s p =
   (lift2 cons p ((s *> sep_by1 s p) <|> return [])) <|> return []
 
-let skip_many p =
-  fix (fun m ->
-    (p *> m) <|> return ())
+let rec skip_many p state =
+  let old_pos = state.pos in
+  match p state with
+  | _ -> skip_many p state
+  | exception (Fail _ as ex) ->
+    if old_pos < Input.parser_committed_bytes state.input then
+      raise_notrace ex;
+    state.pos <- old_pos
 
 let skip_many1 p =
   p *> skip_many p
