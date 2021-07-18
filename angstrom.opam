@@ -13,6 +13,7 @@ build: [
 depends: [
   "ocaml" {>= "4.04.0"}
   "dune" {>= "1.8"}
+  "cstruct" {>= "6.0.0"}
   "alcotest" {with-test & >= "0.8.1"}
   "bigstringaf"
   "ppx_let" {with-test & >= "v0.14.0"}

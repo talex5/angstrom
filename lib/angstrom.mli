@@ -530,8 +530,8 @@ end
 
 module Consume : sig
   type t =
-    | Prefix
-    | All
+    | Prefix            (** Ignore remaining data after parsing. *)
+    | All               (** Require parser to reach eof. *)
 end
 
 val parse_bigstring : consume:Consume.t -> 'a t -> bigstring -> ('a, string) result
@@ -543,7 +543,7 @@ val parse_bigstring : consume:Consume.t -> 'a t -> bigstring -> ('a, string) res
     [consume] argument.
 
     For use-cases requiring that the parser be fed input incrementally, see the
-    {!module:Buffered} and {!module:Unbuffered} modules below. *)
+    {!parse_reader} and {!module:Unbuffered} APIs below. *)
 
 
 val parse_string : consume:Consume.t -> 'a t -> string -> ('a, string) result
@@ -554,10 +554,24 @@ val parse_string : consume:Consume.t -> 'a t -> string -> ('a, string) result
     [consume] argument.
 
     For use-cases requiring that the parser be fed input incrementally, see the
-    {!module:Buffered} and {!module:Unbuffered} modules below. *)
+    {!parse_reader} and {!module:Unbuffered} APIs below. *)
 
+val parse_reader :
+  ?initial_buffer_size:int ->
+  consume:Consume.t ->
+  'a t ->
+  (Cstruct.t -> int) ->
+  ('a, string) result
+(** [parse_reader ~consume t read_into] parses a stream using parser [t].
+    When it needs more data, it calls [read_into buf] to collect some.
+    [read_into] should return the number of bytes written, or raise
+    [End_of_file] if no more data is coming.
+    @param initial_buffer_size The initial size for the buffer (defaulting
+      to 4k bytes). It will automatically grow the buffer as needed.
+    @param consume See {!Consume}.
+    @return The parsed result, or a suitable error message. *)
 
-(** Buffered parsing interface.
+(** Old buffered parsing interface. Use {!parse_reader} instead in new code.
 
     Parsers run through this module perform internal buffering of input. The
     parser state will keep track of unconsumed input and attempt to minimize
@@ -612,6 +626,22 @@ module Buffered : sig
   (** [state_to_unconsumed state] returns [Some bs] if [state = Done(bs, _)] or
       [state = Fail(bs, _, _)] and [None] otherwise. *)
 end
+
+val parse :
+  buffer:Buffered.unconsumed ->
+  'a t ->
+  (Cstruct.t -> int) ->
+  Buffered.unconsumed * ('a, string) result
+(** [parse ~buffer t read_into] parses a stream using [t]. When it needs more data,
+    it calls [read_into cs] to collect some. [read_into] should return the
+    number of bytes written, or raise [End_of_file] if no more data is coming.
+
+    Note: {!parse_reader} provides a simpler interface if you don't need the ability
+    to resume parsing afterwards.
+
+    @param buffer The buffer to use for parsing. This can be a fresh buffer (with off=len=0)
+                  or a buffer returned from a previous call to [parse].
+    @return A pair of the unconsumed input and the parsed result. *)
 
 (** Unbuffered parsing interface.
 

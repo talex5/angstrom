@@ -56,6 +56,13 @@ let feed_bigstring t ~off ~len b =
   Bigstringaf.unsafe_blit b ~src_off:off t.buf ~dst_off:(write_pos t) ~len;
   t.len <- t.len + len
 
+let feed_fn t fn =
+  ensure t 128;
+  let free = Cstruct.of_bigarray t.buf ~off:(write_pos t) ~len:(trailing_space t) in
+  let got = fn free in
+  assert (got > 0);
+  t.len <- t.len + got
+
 let feed_input t = function
   | `String    s -> feed_string    t ~off:0 ~len:(String     .length s) s
   | `Bigstring b -> feed_bigstring t ~off:0 ~len:(Bigstringaf.length b) b
@@ -66,7 +73,7 @@ let shift t n =
   t.len <- t.len - n
 
 let for_reading { buf; off; len } =
-  Bigstringaf.sub ~off ~len buf
+  Cstruct.of_bigarray ~off ~len buf
 
 module Unconsumed = struct
   type t =
@@ -80,6 +87,8 @@ let unconsumed ?(shift=0) { buf; off; len } =
   { Unconsumed.buf; off = off + shift; len = len - shift }
 
 let of_unconsumed { Unconsumed.buf; off; len } =
+  if Bigstringaf.length buf < 1 then
+    failwith "of_unconsumed: invalid argument, length buf < 1";
   { buf; off; len }
 
 type unconsumed = Unconsumed.t =

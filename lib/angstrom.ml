@@ -94,8 +94,8 @@ module Buffered = struct
             Buffering.feed_input buffering input;
             Incomplete
         in
-        let for_reading = Buffering.for_reading buffering in
-        continue k (for_reading, 0, Bigstringaf.length for_reading, more)
+        let { Cstruct.buffer; off; len } = Buffering.for_reading buffering in
+        continue k (buffer, off, len, more)
       in
       Partial cb
 
@@ -697,3 +697,32 @@ let parse_string ~consume p s =
   let bs  = Bigstringaf.create len in
   Bigstringaf.unsafe_blit_from_string s ~src_off:0 bs ~dst_off:0 ~len;
   parse_bigstring ~consume p bs
+
+let parse ~buffer p read_into =
+  let buffering = Buffering.of_unconsumed buffer in
+  let read committed =
+    Buffering.shift buffering committed;
+    let comp =
+      match Buffering.feed_fn buffering read_into with
+      | exception End_of_file -> Complete
+      | () -> Incomplete
+    in
+    let { Cstruct.buffer; off; len } = Buffering.for_reading buffering in
+    (buffer, off, len, comp)
+  in
+  match Unbuffered.parse ~read p with
+  | Unbuffered.Done(consumed, v) ->
+    let unconsumed = Buffering.unconsumed ~shift:consumed buffering in
+    unconsumed, Ok v
+  | Unbuffered.Fail(consumed, marks, msg) ->
+    let unconsumed = Buffering.unconsumed ~shift:consumed buffering in
+    unconsumed, Error (Unbuffered.fail_to_string marks msg)
+
+let parse_reader ?(initial_buffer_size=0x1000) ~consume p read_into =
+  let p =
+    match (consume : Consume.t) with
+    | Prefix -> p
+    | All -> p <* end_of_input
+  in
+  let buffer = { Buffering.buf = Bigstringaf.create initial_buffer_size; off = 0; len = 0 } in
+  snd @@ parse ~buffer p read_into
