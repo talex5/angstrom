@@ -697,3 +697,30 @@ let parse_string ~consume p s =
   let bs  = Bigstringaf.create len in
   Bigstringaf.unsafe_blit_from_string s ~src_off:0 bs ~dst_off:0 ~len;
   parse_bigstring ~consume p bs
+
+let parse ?(initial_buffer_size=0x1000) p read_into =
+  if initial_buffer_size < 1 then
+    failwith "parse: invalid argument, initial_buffer_size < 1";
+  let buffering = Buffering.create initial_buffer_size in
+  let read committed =
+    Buffering.shift buffering committed;
+    let comp =
+      match Buffering.feed_fn buffering read_into with
+      | exception End_of_file -> Complete
+      | () -> Incomplete
+    in
+    let { Buffering.buf; off; len } = Buffering.unconsumed buffering in
+    (buf, off, len, comp)
+  in
+  match Unbuffered.parse ~read p with
+  | Unbuffered.Done(consumed, v) ->
+    let unconsumed = Buffering.unconsumed_cs ~shift:consumed buffering in
+    unconsumed, Ok v
+  | Unbuffered.Fail(consumed, marks, msg) ->
+    let unconsumed = Buffering.unconsumed_cs ~shift:consumed buffering in
+    unconsumed, Error (marks, msg)
+
+let parse_all ?initial_buffer_size p read_into =
+  match parse ?initial_buffer_size (p <* end_of_input) read_into with
+  | _, (Ok _ as x) -> x
+  | _, Error (marks, msg) -> Error (Unbuffered.fail_to_string marks msg)

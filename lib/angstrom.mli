@@ -556,8 +556,27 @@ val parse_string : consume:Consume.t -> 'a t -> string -> ('a, string) result
     For use-cases requiring that the parser be fed input incrementally, see the
     {!module:Buffered} and {!module:Unbuffered} modules below. *)
 
+val parse :
+  ?initial_buffer_size:int ->
+  'a t ->
+  (Cstruct.t -> int) ->
+  Cstruct.t * ('a, string list * string) result
+(** [parse t read_into] parses a stream using [t]. When it needs more data,
+    it calls [read_into buf] to collect some. [read_into] should return the
+    number of bytes written, or raise [End_of_file] if no more data is coming.
+    @return A pair the unconsumed input and the parsed result. *)
 
-(** Buffered parsing interface.
+val parse_all :
+  ?initial_buffer_size:int ->
+  'a t ->
+  (Cstruct.t -> int) ->
+  ('a, string) result
+(** [parse_all t read_into] parses a stream using [t]. When it needs more data,
+    it calls [read_into buf] to collect some. [read_into] should return the
+    number of bytes written, or raise [End_of_file] if no more data is coming.
+    @return The parsed result. *)
+
+(** Old buffered parsing interface. Use {!parse} instead in new code.
 
     Parsers run through this module perform internal buffering of input. The
     parser state will keep track of unconsumed input and attempt to minimize

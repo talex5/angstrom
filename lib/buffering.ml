@@ -56,6 +56,13 @@ let feed_bigstring t ~off ~len b =
   Bigstringaf.unsafe_blit b ~src_off:off t.buf ~dst_off:(write_pos t) ~len;
   t.len <- t.len + len
 
+let feed_fn t fn =
+  ensure t 128;
+  let free = Cstruct.of_bigarray t.buf ~off:(write_pos t) ~len:(trailing_space t) in
+  let got = fn free in
+  assert (got > 0);
+  t.len <- t.len + got
+
 let feed_input t = function
   | `String    s -> feed_string    t ~off:0 ~len:(String     .length s) s
   | `Bigstring b -> feed_bigstring t ~off:0 ~len:(Bigstringaf.length b) b
@@ -78,6 +85,10 @@ end
 let unconsumed ?(shift=0) { buf; off; len } =
   assert (len >= shift);
   { Unconsumed.buf; off = off + shift; len = len - shift }
+
+let unconsumed_cs ?(shift=0) { buf; off; len } =
+  assert (len >= shift);
+  Cstruct.of_bigarray buf ~off:(off + shift) ~len:(len - shift)
 
 let of_unconsumed { Unconsumed.buf; off; len } =
   { buf; off; len }
