@@ -53,9 +53,9 @@ include Parser.Monad
 include Parser.Choice
 
 module Buffered = struct
-  open EffectHandlers
+  open Effect
 
-  type _ eff += Read : int -> (bigstring * int * int * More.t) eff
+  type _ t += Read : int -> (bigstring * int * int * More.t) t
   let read c = perform (Read c)
 
   type unconsumed = Buffering.unconsumed =
@@ -87,7 +87,7 @@ module Buffered = struct
     Deep.match_with (Unbuffered.parse ~read) p
       { Deep.retc = from_unbuffered_state buffering;
         exnc = raise;
-        effc = fun (type a) (e : a EffectHandlers.eff) : (((a, 'b state) Deep.continuation) -> 'b state) option ->
+        effc = fun (type a) (e : a Effect.t) : (((a, 'b state) Deep.continuation) -> 'b state) option ->
           match e with
           | Read committed -> Some (fun k ->
               Buffering.shift buffering committed;
