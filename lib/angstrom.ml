@@ -442,6 +442,7 @@ let fix f =
   let rec p = lazy (f r)
   and r state = (Lazy.force p) state
   in
+  ignore (Lazy.force p);
   r
 
 let option x p =
