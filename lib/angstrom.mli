@@ -43,8 +43,9 @@
     {!skip_while}, Angstrom makes it easy to write efficient, expressive, and
     reusable parsers suitable for high-performance applications. *)
 
+type state
 
-type +'a t
+type +'a t = state -> 'a
 (** A parser for values of type ['a]. *)
 
 
